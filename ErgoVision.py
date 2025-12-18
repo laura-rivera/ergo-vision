@@ -163,6 +163,10 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
+# Initialize NotificationManager if not exists
+if "notification_manager" not in st.session_state:
+    st.session_state.notification_manager = NotificationManager(cooldown_seconds=300)
+
 # ===== NUEVO: estados hidratación FRONTAL (ligero) =====
 for key, default in [
     ("enable_hydration_front", True),
