@@ -54,10 +54,13 @@ def render_frontal(*, POSE, cfg):
             st.session_state.bad_cool_front = 0.0
             st.session_state.lowlight_cool_front = 0.0
 
-            st.session_state.last_drink_ts_front = time.time()
+            # Updated: Initialize hydration timestamp as None instead of time.time()
+            st.session_state.last_drink_ts_front = None
             st.session_state.has_drink_event_front = False
             st.session_state.drink_state_front = "far"
             st.session_state.near_time_front = 0.0
+            # New: Add hydration alert flag
+            st.session_state.hydration_alert_sent_front = False
 
             st.session_state.front_reset_done = True
         elif not webrtc_ctx.state.playing and st.session_state.front_reset_done:
@@ -194,35 +197,109 @@ def render_frontal(*, POSE, cfg):
                             alert_light.empty()
                             st.session_state.light_alert_active_front = False
 
+                    # ---- IMPROVED HYDRATION SECTION ----
                     st.markdown("### 💧 Hidratación (Frontal)")
                     if st.session_state.enable_hydration_front:
                         interval_min = float(st.session_state.hydrate_interval_min_front)
+
+                        # Ensure hydration alert flag exists
+                        if "hydration_alert_sent_front" not in st.session_state:
+                            st.session_state.hydration_alert_sent_front = False
+
+                        # ---------------------------
+                        # 1) Drink Detection Logic (IMPROVED)
+                        # ---------------------------
                         if st.session_state.enable_drink_detection_front and (wd is not None):
-                            D_NEAR, D_FAR = 0.09, 0.14
-                            T_MIN, T_MAX, T_FACE = 0.6, 2.0, 3.5
+                            # Updated parameters: more conservative to reduce false positives
+                            D_NEAR, D_FAR = 0.22, 0.45
+                            T_MIN, T_MAX, T_FACE = 1.3, 3.0, 4.0
                             state = st.session_state.drink_state_front
 
                             if state == "far" and wd < D_NEAR:
                                 st.session_state.drink_state_front = "near"
                                 st.session_state.near_time_front = 0.0
+
                             elif state == "near":
-                                st.session_state.near_time_front += dt
-                                if st.session_state.near_time_front > T_FACE:
-                                    st.session_state.drink_state_front = "far"
-                                    st.session_state.near_time_front = 0.0
-                                if wd > D_FAR:
+                                # IMPROVED: Only accumulate time when hand is actually near
+                                if wd < D_NEAR:
+                                    st.session_state.near_time_front += dt
+
+                                    # Cancel if hand stays too long (face resting on hand, etc.)
+                                    if st.session_state.near_time_front > T_FACE:
+                                        st.session_state.drink_state_front = "far"
+                                        st.session_state.near_time_front = 0.0
+
+                                else:
+                                    # Hand moved away → evaluate gesture
                                     t = st.session_state.near_time_front
+
+                                    # Anti-false-positive filter: minimum 60 seconds between detections
+                                    MIN_GAP_SEC = 60  # 1 minute
+                                    last = st.session_state.last_drink_ts_front
+
                                     if (t >= T_MIN) and (t <= T_MAX):
-                                        st.session_state.last_drink_ts_front = now
-                                        st.session_state.has_drink_event_front = True
+                                        if (last is None) or ((now - last) >= MIN_GAP_SEC):
+                                            st.session_state.last_drink_ts_front = now
+                                            st.session_state.has_drink_event_front = True
+
+                                            # Reset alert flag - allow future notifications
+                                            st.session_state.hydration_alert_sent_front = False
+
                                     st.session_state.drink_state_front = "far"
                                     st.session_state.near_time_front = 0.0
 
-                        if st.session_state.has_drink_event_front:
-                            elapsed_min = max(0.0, (now - st.session_state.last_drink_ts_front) / 60.0)
-                            st.write(f"**Hidratación detectada hace:** {elapsed_min:.0f} min (intervalo: {interval_min:.0f} min)")
+                        # ------------------------------------------
+                        # 2) Automatic Notification when interval expires
+                        #    (only once until next drink detection)
+                        # ------------------------------------------
+                        if (
+                            cfg.get("enable_desktop_notifications", True)
+                            and (st.session_state.last_drink_ts_front is not None)
+                        ):
+                            elapsed_min = (now - st.session_state.last_drink_ts_front) / 60.0
+
+                            if (elapsed_min >= interval_min) and (not st.session_state.hydration_alert_sent_front):
+                                # Send notification using existing system
+                                try:
+                                    msg = get_notification_message('hydration_reminder')
+                                    st.session_state.notification_manager.send(
+                                        'hydration_reminder',
+                                        msg['title'],
+                                        msg['message'],
+                                        sound_type=msg.get('sound', 'default'),
+                                        play_sound=cfg.get("enable_notification_sound", True),
+                                    )
+                                except Exception:
+                                    # Fallback if 'hydration_reminder' key doesn't exist
+                                    st.session_state.notification_manager.send(
+                                        'hydration_reminder',
+                                        "💧 Hora de hidratarse",
+                                        "Ha pasado mucho tiempo desde tu última hidratación. Toma agua 💦",
+                                        sound_type='default',
+                                        play_sound=cfg.get("enable_notification_sound", True),
+                                    )
+
+                                st.session_state.hydration_alert_sent_front = True
+
+                        # ---------------------------
+                        # 3) UI Display (IMPROVED)
+                        # ---------------------------
+                        if st.session_state.last_drink_ts_front is None:
+                            st.info(
+                                f"💧 Hidratación: **sin registro aún** (intervalo: {interval_min:.0f} min).\n\n"
+                                "Toma agua normalmente o usa el botón **Tomé agua ✅** una sola vez para iniciar."
+                            )
                         else:
-                            st.write(f"**Hidratación:** sin detección todavía (intervalo: {interval_min:.0f} min)")
+                            elapsed_min = max(0.0, (now - st.session_state.last_drink_ts_front) / 60.0)
+                            
+                            if elapsed_min >= interval_min:
+                                st.error(f"⚠️ **Hidratación detectada hace:** {elapsed_min:.0f} min (intervalo: {interval_min:.0f} min)")
+                                st.caption("¡Es hora de tomar agua!")
+                            elif elapsed_min >= interval_min * 0.8:
+                                st.warning(f"**Hidratación detectada hace:** {elapsed_min:.0f} min (intervalo: {interval_min:.0f} min)")
+                            else:
+                                st.success(f"**Hidratación detectada hace:** {elapsed_min:.0f} min (intervalo: {interval_min:.0f} min)")
+
                     else:
                         st.info("Hidratación desactivada (frontal).")
 
