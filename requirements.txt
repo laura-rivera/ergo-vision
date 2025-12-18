@@ -4,5 +4,6 @@ opencv-python-headless==4.8.1.78
 mediapipe>=0.10.0
 numpy>=1.26.0
 av>=12.3.0
+plyer
 
 
