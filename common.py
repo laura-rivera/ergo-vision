@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 import mediapipe as mp
 import av
+import streamlit as st
 from streamlit_webrtc import RTCConfiguration
 
 # MediaPipe
@@ -282,3 +283,32 @@ def make_callback(*, mode, shared, lock, frame_counter, neck_ema_obj, bright_ema
             return av.VideoFrame.from_ndarray(img, format="bgr24")
 
     return callback
+
+def update_sitting_time(dt, pose_detected):
+    """
+    Actualiza el tiempo sentado basándose en si se detecta pose.
+    Si hay pose = persona presente = sentado
+    """
+    if not st.session_state.get("enable_sitting_tracker", True):
+        return
+    
+    now = time.time()
+    
+    # Si detectamos pose, la persona está sentada
+    if pose_detected:
+        if not st.session_state.get("is_currently_sitting", False):
+            # Persona acaba de sentarse
+            st.session_state.is_currently_sitting = True
+            st.session_state.sitting_start_time = now
+        
+        # Acumular tiempo sentado
+        st.session_state.total_sitting_time = st.session_state.get("total_sitting_time", 0.0) + dt
+        
+    else:
+        # No hay pose = persona no está o se levantó
+        if st.session_state.get("is_currently_sitting", False):
+            # Persona se levantó - resetear
+            st.session_state.is_currently_sitting = False
+            st.session_state.sitting_start_time = None
+            st.session_state.total_sitting_time = 0.0
+            st.session_state.sitting_alert_sent = False

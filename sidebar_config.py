@@ -33,6 +33,19 @@ def init_session_defaults():
     ]:
         st.session_state.setdefault(key, default)
 
+    # ===== NUEVO: Tiempo sentado =====
+    for key, default in [
+        ("enable_sitting_tracker", True),
+        ("sitting_time_threshold_min", 30),  # Alert after 30 minutes
+        ("sitting_start_time", None),  # When user started sitting
+        ("total_sitting_time", 0.0),  # Accumulated sitting time in seconds
+        ("is_currently_sitting", False),
+        ("sitting_alert_sent", False),
+        ("last_sitting_alert_time", 0.0),
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default
+
 def render_sidebar():
     init_session_defaults()
 
@@ -133,6 +146,27 @@ def render_sidebar():
             st.session_state.drink_state_front = "far"
             st.session_state.near_time_front = 0.0
             st.success("Hidratación registrada (frontal).")
+
+        # ===== Tiempo Sentado =====
+        st.subheader("⏳ Tiempo Sentado")
+        st.session_state.enable_sitting_tracker = st.checkbox(
+            "Activar monitoreo de tiempo sentado",
+            value=st.session_state.enable_sitting_tracker
+        )
+        st.session_state.sitting_time_threshold_min = st.slider(
+            "Alerta después de (minutos)",
+            5, 120,
+            int(st.session_state.sitting_time_threshold_min),
+            5,
+            help="Tiempo máximo recomendado sentado antes de tomar un descanso"
+        )
+        
+        # Botón para resetear el contador manualmente
+        if st.button("Resetear tiempo sentado ⏳", key="reset_sitting_btn"):
+            st.session_state.total_sitting_time = 0.0
+            st.session_state.sitting_start_time = time.time()
+            st.session_state.sitting_alert_sent = False
+            st.success("Contador de tiempo sentado reseteado.")
 
     thr = {
         "FRONTAL_GOOD_MIN": float(fr_good),

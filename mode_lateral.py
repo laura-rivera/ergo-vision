@@ -3,7 +3,7 @@ import threading
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from notificaciones import get_notification_message
-from common import RTC_CONFIGURATION, EMA, new_shared_state, reset_shared, make_callback, posture_category_for_panel, lighting_category
+from common import RTC_CONFIGURATION, EMA, new_shared_state, reset_shared, make_callback, posture_category_for_panel, lighting_category, update_sitting_time
 
 def render_lateral(*, POSE, cfg):
     shared_lock = threading.Lock()
@@ -93,6 +93,46 @@ def render_lateral(*, POSE, cfg):
                     dt_raw = now - st.session_state.last_tick_side
                     dt = min(max(dt_raw, 0.0), 0.5)
                     st.session_state.last_tick_side = now
+
+                    update_sitting_time(dt, nang is not None or nraw is not None)
+
+                    # ---- Tiempo Sentado ----
+                    if st.session_state.enable_sitting_tracker:
+                        st.markdown("### ðŸª' Tiempo Sentado")
+                        
+                        # Detectar si hay pose (persona presente)
+                        pose_detected = (nang is not None or nraw is not None)
+                        update_sitting_time(dt, pose_detected)
+                        
+                        sitting_minutes = st.session_state.total_sitting_time / 60.0
+                        threshold_min = st.session_state.sitting_time_threshold_min
+                        
+                        if st.session_state.is_currently_sitting:
+                            if sitting_minutes >= threshold_min:
+                                st.error(f"⚠️ Llevas {sitting_minutes:.0f} minutos sentado")
+                                st.caption(f"Recomendación: Levántate cada {threshold_min} min")
+                            elif sitting_minutes >= threshold_min * 0.8:
+                                st.warning(f"Tiempo sentado: {sitting_minutes:.0f} min de {threshold_min}")
+                            else:
+                                st.info(f"Tiempo sentado: {sitting_minutes:.0f} min de {threshold_min}")
+                            
+                            # Enviar alerta si excede el umbral
+                            if sitting_minutes >= threshold_min and not st.session_state.sitting_alert_sent:
+                                if cfg["enable_desktop_notifications"]:
+                                    msg = get_notification_message('sitting_too_long')
+                                    success = st.session_state.notification_manager.send(
+                                        'sitting_too_long',
+                                        msg['title'],
+                                        msg['message'],
+                                        sound_type=msg['sound'],
+                                        play_sound=cfg["enable_notification_sound"]
+                                    )
+                                    if success:
+                                        st.session_state.sitting_alert_sent = True
+                                        st.session_state.last_sitting_alert_time = now
+                        else:
+                            st.success("✅ No estás sentado o sin detección")
+                            st.caption("El contador se reinicia al detectar que te levantas")          
 
                     if cfg["enable_posture_alerts"]:
                         if p_level == "bad":
