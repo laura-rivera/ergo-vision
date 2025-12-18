@@ -163,7 +163,7 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Initialize NotificationManager if not exists
+# Inicializar las notificaciones
 if "notification_manager" not in st.session_state:
     st.session_state.notification_manager = NotificationManager(cooldown_seconds=300)
 
@@ -625,7 +625,7 @@ with tabs[0]:
                             st.session_state.bad_timer_side = 0.0
                             st.session_state.bad_cool_side = now + cooldown_seconds
 
-                            # Desktop notification
+                            # Notificación de escritorio
                             if enable_desktop_notifications:
                                 msg = get_notification_message('posture_bad_side')
                                 st.session_state.notification_manager.send(
@@ -658,7 +658,7 @@ with tabs[0]:
                             st.session_state.lowlight_timer_side = 0.0
                             st.session_state.lowlight_cool_side = now + cooldown_seconds
 
-                            # Desktop notification
+                            # Notificación de escritorio
                             if enable_desktop_notifications:
                                 msg = get_notification_message('lighting_low_side')
                                 st.session_state.notification_manager.send(
@@ -786,7 +786,7 @@ with tabs[1]:
                             st.session_state.bad_timer_front = 0.0
                             st.session_state.bad_cool_front = now + cooldown_seconds
 
-                            # Desktop notification
+                            # Notificación de escritorio
                             if enable_desktop_notifications:
                                 msg = get_notification_message('posture_bad_front')
                                 st.session_state.notification_manager.send(
@@ -819,7 +819,7 @@ with tabs[1]:
                             st.session_state.lowlight_timer_front = 0.0
                             st.session_state.lowlight_cool_front = now + cooldown_seconds
 
-                            # Desktop notification
+                            # Notificación de escritorio
                             if enable_desktop_notifications:
                                 msg = get_notification_message('lighting_low_front')
                                 st.session_state.notification_manager.send(

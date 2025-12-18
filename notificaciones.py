@@ -1,8 +1,3 @@
-"""
-Notification Helper for ErgoVision
-Handles desktop notifications and system sounds
-"""
-
 import time
 import threading
 import platform
@@ -11,12 +6,6 @@ from plyer import notification
 
 
 def play_system_sound(sound_type='default'):
-    """
-    Play system sounds (cross-platform)
-    
-    Args:
-        sound_type: 'default', 'alert', 'warning', 'success'
-    """
     system = platform.system()
     
     try:
@@ -56,46 +45,25 @@ def play_system_sound(sound_type='default'):
             winsound.MessageBeep(sound)
             
     except Exception as e:
-        print(f"⚠️ Could not play system sound: {e}")
+        print(f"⚠️ No se pudo reproducir el sonido del sistema: {e}")
 
 
 class NotificationManager:
-    """
-    Manages desktop notifications with cooldown periods and system sounds
-    """
-    
+
     def __init__(self, cooldown_seconds=300):
-        """
-        Initialize the notification manager
-        
-        Args:
-            cooldown_seconds: Minimum time between notifications of the same type
-        """
         self.last_notifications = {}
         self.cooldown = cooldown_seconds
     
     def can_notify(self, notification_type):
-        """Check if enough time has passed since last notification of this type"""
+        """Verifica si ha pasado el tiempo de cooldown para este tipo de notificación"""
         last_time = self.last_notifications.get(notification_type, 0)
         return time.time() - last_time > self.cooldown
     
     def send(self, notification_type, title, message, sound_type='default', play_sound=True):
-        """
-        Send a desktop notification with optional system sound
-        
-        Args:
-            notification_type: Unique identifier for this type of notification
-            title: Notification title
-            message: Notification message
-            sound_type: Type of system sound ('default', 'alert', 'warning', 'success')
-            play_sound: Whether to play sound
-            
-        Returns:
-            True if notification was sent, False if cooldown not elapsed
-        """
+        """Envía una notificación de escritorio con sonido opcional"""
         if self.can_notify(notification_type):
             try:
-                # Send desktop notification
+                # Enviar notificación de escritorio
                 notification.notify(
                     title=title,
                     message=message,
@@ -103,7 +71,7 @@ class NotificationManager:
                     timeout=10  # seconds
                 )
                 
-                # Play system sound in separate thread to avoid blocking
+                # Reproducir sonido del sistema en un hilo separado para evitar bloqueo
                 if play_sound:
                     threading.Thread(
                         target=play_system_sound, 
@@ -111,26 +79,26 @@ class NotificationManager:
                         daemon=True
                     ).start()
                 
-                # Update last notification time
+                # Actualizar tiempo de la última notificación
                 self.last_notifications[notification_type] = time.time()
                 return True
                 
             except Exception as e:
-                print(f"❌ Notification error: {e}")
+                print(f"❌ Error en la notificación: {e}")
                 return False
         return False
     
     def reset_type(self, notification_type):
-        """Reset cooldown for a specific notification type"""
+        """Restablecer el cooldown para un tipo específico de notificación"""
         if notification_type in self.last_notifications:
             del self.last_notifications[notification_type]
     
     def reset_all(self):
-        """Reset all notification cooldowns"""
+        """Restablecer todos los cooldowns de notificaciones"""
         self.last_notifications.clear()
 
 
-# Predefined notification messages with sound types
+# Notificaciones predefinidas
 NOTIFICATION_MESSAGES = {
     'posture_bad_side': {
         'title': '⚠️ Alerta de Postura (Lateral)',
@@ -166,20 +134,10 @@ NOTIFICATION_MESSAGES = {
 
 
 def get_notification_message(notification_type, **kwargs):
-    """
-    Get notification message with optional formatting
-    
-    Args:
-        notification_type: Type of notification
-        **kwargs: Additional formatting parameters
-        
-    Returns:
-        Dictionary with 'title', 'message', and 'sound'
-    """
     if notification_type in NOTIFICATION_MESSAGES:
         msg = NOTIFICATION_MESSAGES[notification_type].copy()
         
-        # Format message with kwargs if provided
+        # Formatear mensaje con kwargs si se proporcionan
         if kwargs:
             msg['message'] = msg['message'].format(**kwargs)
         
@@ -187,6 +145,6 @@ def get_notification_message(notification_type, **kwargs):
     
     return {
         'title': 'ErgoVision Alert',
-        'message': 'Please check your wellness dashboard',
+        'message': 'Porfavor, atiende a la notificación.',
         'sound': 'default'
     }
