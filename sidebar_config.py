@@ -5,6 +5,9 @@ from notificaciones import NotificationManager
 def init_session_defaults():
     st.session_state.setdefault("side_reset_done", False)
     st.session_state.setdefault("front_reset_done", False)
+    # Historial (SQLite)
+    st.session_state.setdefault("enable_history", True)
+    st.session_state.setdefault("history_db_path", "ergovision_sessions.db")
 
     for key, default in [
         ("bad_timer_side", 0.0), ("bad_timer_front", 0.0),
@@ -22,7 +25,18 @@ def init_session_defaults():
     if "notification_manager" not in st.session_state:
         st.session_state.notification_manager = NotificationManager(cooldown_seconds=300)
 
+    # ===== HIDRATACIÓN COMPARTIDA (ambos modos) =====
     for key, default in [
+        # Lateral
+        ("enable_hydration", True),
+        ("enable_drink_detection", True),
+        ("hydrate_interval_min", 45),
+        ("last_drink_ts", None),
+        ("hydration_alert_sent", False),
+        ("has_drink_event", False),
+        ("drink_state", "far"),
+        ("near_time", 0.0),
+        # Frontal
         ("enable_hydration_front", True),
         ("enable_drink_detection_front", True),
         ("hydrate_interval_min_front", 45),
@@ -34,12 +48,12 @@ def init_session_defaults():
     ]:
         st.session_state.setdefault(key, default)
 
-    # ===== NUEVO: Tiempo sentado =====
+    # ===== TIEMPO SENTADO =====
     for key, default in [
         ("enable_sitting_tracker", True),
-        ("sitting_time_threshold_min", 30),  # Alert after 30 minutes
-        ("sitting_start_time", None),  # When user started sitting
-        ("total_sitting_time", 0.0),  # Accumulated sitting time in seconds
+        ("sitting_time_threshold_min", 30),
+        ("sitting_start_time", None),
+        ("total_sitting_time", 0.0),
         ("is_currently_sitting", False),
         ("sitting_alert_sent", False),
         ("last_sitting_alert_time", 0.0),
@@ -47,7 +61,52 @@ def init_session_defaults():
         if key not in st.session_state:
             st.session_state[key] = default
 
+
+def get_config(
+    lighting_thresh,
+    process_every_n,
+    debug_overlay,
+    fr_good,
+    fr_fair,
+    lat_good,
+    lat_fair,
+    enable_posture_alerts,
+    posture_seconds,
+    good_seconds,
+    enable_light_alerts,
+    light_seconds,
+    good_light_seconds,
+    cooldown_seconds,
+    enable_desktop_notifications,
+    enable_notification_sound
+):
+    """
+    Construye el diccionario de configuración usado por los modos lateral y frontal.
+    """
+    return {
+        "lighting_thresh": float(lighting_thresh),
+        "process_every_n": int(process_every_n),
+        "debug_overlay": bool(debug_overlay),
+        "thr": {
+            "front": {"good": float(fr_good), "fair": float(fr_fair)},
+            "side": {"good": float(lat_good), "fair": float(lat_fair)}
+        },
+        "enable_posture_alerts": bool(enable_posture_alerts),
+        "posture_seconds": int(posture_seconds),
+        "good_seconds": int(good_seconds),
+        "enable_light_alerts": bool(enable_light_alerts),
+        "light_seconds": int(light_seconds),
+        "good_light_seconds": int(good_light_seconds),
+        "cooldown_seconds": int(cooldown_seconds),
+        "enable_desktop_notifications": bool(enable_desktop_notifications),
+        "enable_notification_sound": bool(enable_notification_sound),
+    }
+
+
 def render_sidebar():
+    """
+    Función legacy - mantener por compatibilidad si se usa en otro lugar.
+    """
     init_session_defaults()
 
     with st.sidebar:
@@ -97,11 +156,11 @@ def render_sidebar():
         st.subheader("Alertas")
         enable_posture_alerts = st.checkbox("Activar alertas por mala postura", value=True)
         posture_seconds = st.slider("Segundos de mala postura para alertar", 3, 20, 6, 1)
-        good_seconds = 3
+        good_seconds = st.slider("Segundos de buena postura para limpiar", 2, 10, 3, 1)
 
         enable_light_alerts = st.checkbox("Activar alertas por baja iluminación", value=True)
         light_seconds = st.slider("Segundos de baja luz para alertar", 3, 20, 8, 1)
-        good_light_seconds = 3
+        good_light_seconds = st.slider("Segundos de buena luz para limpiar", 2, 10, 3, 1)
 
         cooldown_seconds = st.slider("Tiempo de espera entre alertas (cool-down)", 3, 60, 15, 1)
 
@@ -125,30 +184,35 @@ def render_sidebar():
             help="Reproduce sonidos nativos del sistema operativo"
         )
 
-        st.subheader("💧 Hidratación (Frontal)")
-        st.session_state.enable_hydration_front = st.checkbox(
-            "Activar hidratación (frontal)",
-            value=st.session_state.enable_hydration_front
+        st.subheader("💧 Hidratación")
+        st.session_state.enable_hydration = st.checkbox(
+            "Activar hidratación",
+            value=st.session_state.enable_hydration
         )
-        st.session_state.hydrate_interval_min_front = st.slider(
+        st.session_state.hydrate_interval_min = st.slider(
             "Intervalo (min)",
             2, 120,
-            int(st.session_state.hydrate_interval_min_front),
+            int(st.session_state.hydrate_interval_min),
             5
         )
-        st.session_state.enable_drink_detection_front = st.checkbox(
+        st.session_state.enable_drink_detection = st.checkbox(
             "Detectar gesto de beber (beta)",
-            value=st.session_state.enable_drink_detection_front
+            value=st.session_state.enable_drink_detection
         )
 
-        if st.button("Tomé agua ✅ (manual)", key="drink_btn_sidebar_front"):
+        if st.button("Tomé agua ✅", key="drink_btn_sidebar"):
+            st.session_state.last_drink_ts = time.time()
             st.session_state.last_drink_ts_front = time.time()
+            st.session_state.has_drink_event = True
             st.session_state.has_drink_event_front = True
+            st.session_state.drink_state = "far"
             st.session_state.drink_state_front = "far"
+            st.session_state.near_time = 0.0
             st.session_state.near_time_front = 0.0
-            st.success("Hidratación registrada (frontal).")
+            st.session_state.hydration_alert_sent = False
+            st.session_state.hydration_alert_sent_front = False
+            st.success("Hidratación registrada.")
 
-        # ===== Tiempo Sentado =====
         st.subheader("⏳ Tiempo Sentado")
         st.session_state.enable_sitting_tracker = st.checkbox(
             "Activar monitoreo de tiempo sentado",
@@ -162,12 +226,23 @@ def render_sidebar():
             help="Tiempo máximo recomendado sentado antes de tomar un descanso"
         )
         
-        # Botón para resetear el contador manualmente
         if st.button("Resetear tiempo sentado ⏳", key="reset_sitting_btn"):
             st.session_state.total_sitting_time = 0.0
             st.session_state.sitting_start_time = time.time()
             st.session_state.sitting_alert_sent = False
             st.success("Contador de tiempo sentado reseteado.")
+
+        st.subheader("📈 Historial")
+        st.session_state.enable_history = st.checkbox(
+            "Guardar sesiones en historial (SQLite)",
+            value=st.session_state.enable_history,
+            help="Guarda un resumen por sesión (sin video)."
+        )
+        st.session_state.history_db_path = st.text_input(
+            "Archivo de base de datos",
+            value=st.session_state.history_db_path,
+            help="Ruta del archivo .db (por defecto: ergovision_sessions.db)."
+)
 
     thr = {
         "FRONTAL_GOOD_MIN": float(fr_good),
@@ -190,4 +265,6 @@ def render_sidebar():
         cooldown_seconds=int(cooldown_seconds),
         enable_desktop_notifications=bool(enable_desktop_notifications),
         enable_notification_sound=bool(enable_notification_sound),
+        enable_history=bool(st.session_state.enable_history),
+        history_db_path=str(st.session_state.history_db_path),
     )

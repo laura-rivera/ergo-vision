@@ -7,11 +7,15 @@ import av
 import streamlit as st
 from streamlit_webrtc import RTCConfiguration
 
+# =========================
 # MediaPipe
+# =========================
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
-# WebRTC (default)
+# =========================
+# WebRTC Configuration
+# =========================
 RTC_CONFIGURATION = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
 
 def try_limit_opencv_threads(n=2):
@@ -20,6 +24,9 @@ def try_limit_opencv_threads(n=2):
     except Exception:
         pass
 
+# =========================
+# EMA (Exponential Moving Average)
+# =========================
 class EMA:
     def __init__(self, alpha=0.3, initial=None):
         self.alpha = float(alpha)
@@ -34,6 +41,9 @@ class EMA:
             self.value = self.alpha * float(x) + (1.0 - self.alpha) * self.value
         return self.value
 
+# =========================
+# Geometría - Angle Calculations
+# =========================
 def calculate_angle(a, b, c):
     a = np.array(a, dtype=np.float32)
     b = np.array(b, dtype=np.float32)
@@ -55,6 +65,9 @@ def angle_with_vertical(p_sh, p_ear):
 
 pose_lock = threading.Lock()
 
+# =========================
+# MediaPipe Pose Model
+# =========================
 def build_pose_model():
     return mp_pose.Pose(
         static_image_mode=False,
@@ -64,6 +77,9 @@ def build_pose_model():
         min_tracking_confidence=0.5,
     )
 
+# =========================
+# Shared State Management
+# =========================
 def new_shared_state():
     return {
         "posture_msg": "Inicializando...",
@@ -74,7 +90,7 @@ def new_shared_state():
         "brightness_smooth": 0.0,
         "lighting_ok": True,
         "last_update_ts": 0.0,
-        "wrist_mouth_dist": None,
+        "wrist_mouth_dist": None,  # SOLO distancia 2D
     }
 
 def reset_shared(shared, neck_ema_obj, bright_ema_obj):
@@ -82,6 +98,9 @@ def reset_shared(shared, neck_ema_obj, bright_ema_obj):
     neck_ema_obj.value = None
     bright_ema_obj.value = 60.0
 
+# =========================
+# Neck Angle Calculations
+# =========================
 def neck_angle_side_best(lmk, min_vis=0.3):
     L_EAR = mp_pose.PoseLandmark.LEFT_EAR.value
     L_SH = mp_pose.PoseLandmark.LEFT_SHOULDER.value
@@ -132,41 +151,77 @@ def neck_angle_front_best(lmk, min_vis=0.3):
         return max(aL, aR)
     return aL if aL is not None else aR
 
+# =========================
+# Posture Classification
+# =========================
 def classify_posture_by_mode(angle_s, mode, thr):
     if angle_s is None:
         return "No se detecta postura", "⚪"
-    if mode == "front":
-        if angle_s >= thr["FRONTAL_GOOD_MIN"]:
-            return "Buena postura", "🟢"
-        if angle_s >= thr["FRONTAL_FAIR_MIN"]:
-            return "Postura regular", "🟡"
-        return "MALA POSTURA", "🔴"
+    
+    # Soporte para ambos formatos
+    if "FRONTAL_GOOD_MIN" in thr:
+        # Formato antiguo
+        if mode == "front":
+            if angle_s >= thr["FRONTAL_GOOD_MIN"]:
+                return "Buena postura", "🟢"
+            if angle_s >= thr["FRONTAL_FAIR_MIN"]:
+                return "Postura regular", "🟡"
+            return "MALA POSTURA", "🔴"
+        else:
+            if angle_s >= thr["LATERAL_GOOD_MIN"]:
+                return "Buena postura", "🟢"
+            if angle_s >= thr["LATERAL_FAIR_MIN"]:
+                return "Postura regular", "🟡"
+            return "MALA POSTURA", "🔴"
     else:
-        if angle_s >= thr["LATERAL_GOOD_MIN"]:
+        # Formato nuevo
+        mode_key = "front" if mode == "front" else "side"
+        if angle_s >= thr[mode_key]["good"]:
             return "Buena postura", "🟢"
-        if angle_s >= thr["LATERAL_FAIR_MIN"]:
+        if angle_s >= thr[mode_key]["fair"]:
             return "Postura regular", "🟡"
         return "MALA POSTURA", "🔴"
 
 def posture_category_for_panel(angle_value, mode, thr):
-    if angle_value is None:
-        good_thr = thr["FRONTAL_GOOD_MIN"] if mode == "front" else thr["LATERAL_GOOD_MIN"]
-        return ("Sin datos de postura", "none", good_thr)
-    if mode == "front":
-        good_thr = thr["FRONTAL_GOOD_MIN"]
-        if angle_value >= thr["FRONTAL_GOOD_MIN"]:
-            return ("Buena postura", "good", good_thr)
-        if angle_value >= thr["FRONTAL_FAIR_MIN"]:
-            return ("Postura regular", "regular", good_thr)
-        return ("MALA POSTURA", "bad", good_thr)
+    # Soporte para ambos formatos
+    if "FRONTAL_GOOD_MIN" in thr:
+        # Formato antiguo
+        if angle_value is None:
+            good_thr = thr["FRONTAL_GOOD_MIN"] if mode == "front" else thr["LATERAL_GOOD_MIN"]
+            return ("Sin datos de postura", "none", good_thr)
+
+        if mode == "front":
+            good_thr = thr["FRONTAL_GOOD_MIN"]
+            if angle_value >= thr["FRONTAL_GOOD_MIN"]:
+                return ("Buena postura", "good", good_thr)
+            if angle_value >= thr["FRONTAL_FAIR_MIN"]:
+                return ("Postura regular", "regular", good_thr)
+            return ("MALA POSTURA", "bad", good_thr)
+        else:
+            good_thr = thr["LATERAL_GOOD_MIN"]
+            if angle_value >= thr["LATERAL_GOOD_MIN"]:
+                return ("Buena postura", "good", good_thr)
+            if angle_value >= thr["LATERAL_FAIR_MIN"]:
+                return ("Postura regular", "regular", good_thr)
+            return ("MALA POSTURA", "bad", good_thr)
     else:
-        good_thr = thr["LATERAL_GOOD_MIN"]
-        if angle_value >= thr["LATERAL_GOOD_MIN"]:
+        # Formato nuevo
+        mode_key = "front" if mode == "front" else "side"
+        
+        if angle_value is None:
+            good_thr = thr[mode_key]["good"]
+            return ("Sin datos de postura", "none", good_thr)
+
+        good_thr = thr[mode_key]["good"]
+        if angle_value >= thr[mode_key]["good"]:
             return ("Buena postura", "good", good_thr)
-        if angle_value >= thr["LATERAL_FAIR_MIN"]:
+        if angle_value >= thr[mode_key]["fair"]:
             return ("Postura regular", "regular", good_thr)
         return ("MALA POSTURA", "bad", good_thr)
 
+# =========================
+# Lighting Classification
+# =========================
 def lighting_category(bright_smooth, thr_lighting):
     if bright_smooth is None:
         return ("Sin datos de luz", "none")
@@ -178,6 +233,9 @@ def lighting_category(bright_smooth, thr_lighting):
     else:
         return (f"Buena iluminación ({bright_smooth:.1f}/255)", "good")
 
+# =========================
+# Frame Analysis
+# =========================
 def analyze(img_bgr, POSE, angle_fn, neck_ema_obj, bright_ema_obj, mode_label, thr, lighting_thresh, compute_wrist_mouth=False):
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     with pose_lock:
@@ -233,12 +291,15 @@ def analyze(img_bgr, POSE, angle_fn, neck_ema_obj, bright_ema_obj, mode_label, t
 
 ORANGE = (0, 140, 255)
 
+# =========================
+# WebRTC Callback
+# =========================
 def make_callback(*, mode, shared, lock, frame_counter, neck_ema_obj, bright_ema_obj, POSE, thr, lighting_thresh, process_every_n, debug_overlay):
     if mode == "side":
         angle_fn = neck_angle_side_best
         title_msg = "Modo lateral"
         mode_label = "side"
-        compute_wrist_mouth = False
+        compute_wrist_mouth = True  # CHANGED: Now True for both modes
     else:
         angle_fn = neck_angle_front_best
         title_msg = "Modo frontal"
@@ -263,14 +324,12 @@ def make_callback(*, mode, shared, lock, frame_counter, neck_ema_obj, bright_ema
                 compute_wrist_mouth=compute_wrist_mouth,
             )
 
-            if debug_overlay:
-                if res.pose_landmarks:
-                    mp_drawing.draw_landmarks(
-                        img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS,
-                        mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
-                        mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2),
-                    )
-                cv2.putText(img, title_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, ORANGE, 2, cv2.LINE_AA)
+            if debug_overlay and res.pose_landmarks:
+                mp_drawing.draw_landmarks(
+                    img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS,
+                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
+                    mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2),
+                )
 
             with lock:
                 shared.update(data)
@@ -278,12 +337,13 @@ def make_callback(*, mode, shared, lock, frame_counter, neck_ema_obj, bright_ema
 
             return av.VideoFrame.from_ndarray(img, format="bgr24")
         else:
-            if debug_overlay:
-                cv2.putText(img, title_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, ORANGE, 2, cv2.LINE_AA)
             return av.VideoFrame.from_ndarray(img, format="bgr24")
 
     return callback
 
+# =========================
+# Sitting Time Tracker
+# =========================
 def update_sitting_time(dt, pose_detected):
     """
     Actualiza el tiempo sentado basándose en si se detecta pose.
